@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { twilioClient } from "@/lib/twilio";
 
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   if (!twilioClient) {
     return NextResponse.json({ error: "Twilio no configurado" }, { status: 500 });
