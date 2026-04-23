@@ -1,0 +1,53 @@
+import { NextResponse } from "next/server";
+import fs from "fs";
+import path from "path";
+
+const dataDir = path.join(process.cwd(), "data");
+const settingsFile = path.join(dataDir, "settings.json");
+
+function ensureDirectoryExistence(filePath: string) {
+  const dirname = path.dirname(filePath);
+  if (fs.existsSync(dirname)) {
+    return true;
+  }
+  ensureDirectoryExistence(dirname);
+  fs.mkdirSync(dirname);
+}
+
+export async function GET() {
+  try {
+    if (!fs.existsSync(settingsFile)) {
+      return NextResponse.json({ fallbackNumber: "" });
+    }
+    const data = fs.readFileSync(settingsFile, "utf-8");
+    const settings = JSON.parse(data);
+    return NextResponse.json(settings);
+  } catch (error) {
+    return NextResponse.json({ fallbackNumber: "" });
+  }
+}
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    ensureDirectoryExistence(settingsFile);
+    
+    // Read existing to merge
+    let currentSettings = {};
+    if (fs.existsSync(settingsFile)) {
+      try {
+        currentSettings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    const newSettings = { ...currentSettings, ...body };
+    fs.writeFileSync(settingsFile, JSON.stringify(newSettings, null, 2), "utf-8");
+    
+    return NextResponse.json({ success: true, settings: newSettings });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Error guardando ajustes";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}

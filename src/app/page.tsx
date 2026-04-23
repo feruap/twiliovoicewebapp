@@ -584,6 +584,9 @@ function SettingsView({ activeLine, onLineChange }: { activeLine: string; onLine
   const [numbers, setNumbers] = useState<{phone: string, friendlyName: string}[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState("");
+  const [fallbackNumber, setFallbackNumber] = useState("");
+  const [savingFallback, setSavingFallback] = useState(false);
+  const [fallbackMsg, setFallbackMsg] = useState("");
   
   const handleSync = async () => {
     setSyncing(true);
@@ -603,12 +606,41 @@ function SettingsView({ activeLine, onLineChange }: { activeLine: string; onLine
       setTimeout(() => setSyncMsg(""), 5000);
     }
   };
+
+  const handleSaveFallback = async () => {
+    setSavingFallback(true);
+    setFallbackMsg("");
+    try {
+      const res = await fetch("/api/settings", { 
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fallbackNumber: fallbackNumber.trim() })
+      });
+      if (res.ok) {
+        setFallbackMsg("Guardado correctamente.");
+      } else {
+        setFallbackMsg("Error al guardar.");
+      }
+    } catch {
+      setFallbackMsg("Error de conexión.");
+    } finally {
+      setSavingFallback(false);
+      setTimeout(() => setFallbackMsg(""), 3000);
+    }
+  };
   
   useEffect(() => {
     fetch("/api/numbers")
       .then(r => r.json())
       .then(data => {
         if (Array.isArray(data)) setNumbers(data);
+      })
+      .catch(() => {});
+      
+    fetch("/api/settings")
+      .then(r => r.json())
+      .then(data => {
+        if (data.fallbackNumber) setFallbackNumber(data.fallbackNumber);
       })
       .catch(() => {});
   }, []);
@@ -642,6 +674,29 @@ function SettingsView({ activeLine, onLineChange }: { activeLine: string; onLine
               {syncing ? "Sincronizando..." : "Sincronizar Líneas de Twilio"}
             </button>
             {syncMsg && <p className="text-[10px] text-zinc-400 text-center mt-2">{syncMsg}</p>}
+          </div>
+        </div>
+
+        <div className="bg-zinc-900/50 rounded-2xl p-4 border border-zinc-800/50">
+          <p className="text-xs text-zinc-500 uppercase tracking-wider mb-3">Desvío de Llamadas</p>
+          <p className="text-[11px] text-zinc-400 mb-3">Si la app está cerrada, las llamadas se desviarán a este número:</p>
+          <div className="flex flex-col gap-2">
+            <input 
+              type="tel"
+              placeholder="+52XXXXXXXXXX"
+              value={fallbackNumber}
+              onChange={(e) => setFallbackNumber(e.target.value)}
+              className="w-full bg-zinc-800 text-white rounded-xl px-4 py-3 text-sm outline-none border border-zinc-700 focus:border-blue-500/50"
+            />
+            <button
+              onClick={handleSaveFallback}
+              disabled={savingFallback}
+              className="w-full bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded-xl px-4 py-2.5 text-sm font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {savingFallback && <Loader2 className="w-4 h-4 animate-spin" />}
+              {savingFallback ? "Guardando..." : "Guardar Número"}
+            </button>
+            {fallbackMsg && <p className="text-[10px] text-zinc-400 text-center">{fallbackMsg}</p>}
           </div>
         </div>
 

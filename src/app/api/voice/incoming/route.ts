@@ -10,15 +10,29 @@ export async function POST(req: Request) {
   const dialCallStatus = params.get("DialCallStatus");
 
   const twiml = new VoiceResponse();
-  const fallbackNumber = process.env.TWILIO_FALLBACK_NUMBER;
+  
+  let fallbackNumber = process.env.TWILIO_FALLBACK_NUMBER;
+  try {
+    const fs = require("fs");
+    const path = require("path");
+    const settingsFile = path.join(process.cwd(), "data", "settings.json");
+    if (fs.existsSync(settingsFile)) {
+      const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
+      if (settings.fallbackNumber) {
+        fallbackNumber = settings.fallbackNumber;
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
 
   // Si ya intentamos llamar al cliente web y no contestó (o falló), desviamos
   if (dialCallStatus && dialCallStatus !== "completed") {
     if (fallbackNumber) {
-      twiml.say("Desviando llamada, un momento por favor.", { language: "es-MX" });
+      twiml.say({ language: "es-MX" }, "Desviando llamada, un momento por favor.");
       twiml.dial(fallbackNumber);
     } else {
-      twiml.say("El cliente no está disponible en este momento. Por favor intente más tarde.", { language: "es-MX" });
+      twiml.say({ language: "es-MX" }, "El cliente no está disponible en este momento. Por favor intente más tarde.");
     }
     return new NextResponse(twiml.toString(), { headers: { "Content-Type": "text/xml" } });
   }
