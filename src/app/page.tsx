@@ -582,6 +582,27 @@ function CallHistory({ onCallNumber, activeLine }: { onCallNumber: (num: string)
 
 function SettingsView({ activeLine, onLineChange }: { activeLine: string; onLineChange: (line: string) => void }) {
   const [numbers, setNumbers] = useState<{phone: string, friendlyName: string}[]>([]);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState("");
+  
+  const handleSync = async () => {
+    setSyncing(true);
+    setSyncMsg("");
+    try {
+      const res = await fetch("/api/sync-webhooks", { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        setSyncMsg(data.message || "Sincronizado correctamente.");
+      } else {
+        setSyncMsg(data.error || "Error al sincronizar.");
+      }
+    } catch {
+      setSyncMsg("Error de conexión.");
+    } finally {
+      setSyncing(false);
+      setTimeout(() => setSyncMsg(""), 5000);
+    }
+  };
   
   useEffect(() => {
     fetch("/api/numbers")
@@ -610,6 +631,18 @@ function SettingsView({ activeLine, onLineChange }: { activeLine: string; onLine
               <option key={n.phone} value={n.phone}>{formatPhone(n.phone)} ({n.friendlyName})</option>
             ))}
           </select>
+
+          <div className="mt-4 pt-4 border-t border-zinc-800/50">
+            <button
+              onClick={handleSync}
+              disabled={syncing}
+              className="w-full bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded-xl px-4 py-2.5 text-sm font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {syncing && <Loader2 className="w-4 h-4 animate-spin" />}
+              {syncing ? "Sincronizando..." : "Sincronizar Líneas de Twilio"}
+            </button>
+            {syncMsg && <p className="text-[10px] text-zinc-400 text-center mt-2">{syncMsg}</p>}
+          </div>
         </div>
 
         <div className="bg-zinc-900/50 rounded-2xl p-4 border border-zinc-800/50">

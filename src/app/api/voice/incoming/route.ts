@@ -4,11 +4,32 @@ import twilio from "twilio";
 const VoiceResponse = twilio.twiml.VoiceResponse;
 
 // Cuando alguien llama a tu número de Twilio, Twilio hace POST aquí
-export async function POST() {
+export async function POST(req: Request) {
+  const body = await req.text();
+  const params = new URLSearchParams(body);
+  const dialCallStatus = params.get("DialCallStatus");
+
   const twiml = new VoiceResponse();
-  
-  // Enrutar la llamada al cliente web
-  const dial = twiml.dial();
+  const fallbackNumber = process.env.TWILIO_FALLBACK_NUMBER;
+
+  // Si ya intentamos llamar al cliente web y no contestó (o falló), desviamos
+  if (dialCallStatus && dialCallStatus !== "completed") {
+    if (fallbackNumber) {
+      twiml.say("Desviando llamada, un momento por favor.", { language: "es-MX" });
+      twiml.dial(fallbackNumber);
+    } else {
+      twiml.say("El cliente no está disponible en este momento. Por favor intente más tarde.", { language: "es-MX" });
+    }
+    return new NextResponse(twiml.toString(), { headers: { "Content-Type": "text/xml" } });
+  }
+
+  // Primera pasada: Enrutar la llamada al cliente web PWA
+  // Establecemos timeout de 20s y enviamos la respuesta de vuelta a esta misma ruta
+  const dial = twiml.dial({ 
+    timeout: 20, 
+    action: "/api/voice/incoming", // Vuelve a llamar a este endpoint cuando termine o falle
+    method: "POST" 
+  });
   dial.client("personal_client_01");
   
   return new NextResponse(twiml.toString(), {
