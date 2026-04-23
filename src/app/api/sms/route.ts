@@ -9,29 +9,35 @@ export async function GET() {
   try {
     const messages = await twilioClient.messages.list({ limit: 200 });
 
-    // Agrupar mensajes por conversación (número remoto)
+    // Agrupar mensajes por conversación (número remoto + número local)
     const conversations: Record<string, {
       phone: string;
+      localPhone: string;
       messages: typeof messages;
       lastMessage: string;
       lastDate: Date;
     }> = {};
 
     for (const msg of messages) {
-      const remoteNumber = msg.direction === "inbound" ? msg.from : msg.to;
-      if (!conversations[remoteNumber]) {
-        conversations[remoteNumber] = {
+      const isOutbound = msg.direction === "outbound-api" || msg.direction === "outbound-call" || msg.direction === "outbound-reply";
+      const remoteNumber = isOutbound ? msg.to : msg.from;
+      const localNumber = isOutbound ? msg.from : msg.to;
+      const convoKey = `${localNumber}_${remoteNumber}`;
+
+      if (!conversations[convoKey]) {
+        conversations[convoKey] = {
           phone: remoteNumber,
+          localPhone: localNumber,
           messages: [],
           lastMessage: msg.body || "",
           lastDate: msg.dateCreated || new Date(),
         };
       }
-      conversations[remoteNumber].messages.push(msg);
+      conversations[convoKey].messages.push(msg);
       const msgDate = msg.dateCreated || new Date();
-      if (msgDate > conversations[remoteNumber].lastDate) {
-        conversations[remoteNumber].lastDate = msgDate;
-        conversations[remoteNumber].lastMessage = msg.body || "";
+      if (msgDate > conversations[convoKey].lastDate) {
+        conversations[convoKey].lastDate = msgDate;
+        conversations[convoKey].lastMessage = msg.body || "";
       }
     }
 
@@ -48,7 +54,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const { to, body } = await req.json();
+    const { to, body, from } = await req.json();
     
     if (!to || !body) {
       return NextResponse.json({ error: "Faltan parámetros (to, body)" }, { status: 400 });
@@ -56,7 +62,7 @@ export async function POST(req: Request) {
 
     const message = await twilioClient.messages.create({
       body: body,
-      from: myTwilioNumber,
+      from: from || myTwilioNumber,
       to: to,
     });
 

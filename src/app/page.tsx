@@ -35,6 +35,7 @@ interface SmsMessage {
 
 interface Conversation {
   phone: string;
+  localPhone: string;
   messages: SmsMessage[];
   lastMessage: string;
   lastDate: string;
@@ -277,7 +278,7 @@ function Dialer({
 
 // ─── Messages Component ─────────────────────────────────────────────────
 
-function Messages() {
+function Messages({ activeLine }: { activeLine: string }) {
   const [conversations, setConversations] = useState<Record<string, Conversation>>({});
   const [loading, setLoading] = useState(true);
   const [activeChat, setActiveChat] = useState<string | null>(null);
@@ -318,7 +319,7 @@ function Messages() {
       const res = await fetch("/api/sms", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to, body: newMsg.trim() }),
+        body: JSON.stringify({ to, body: newMsg.trim(), from: activeLine }),
       });
       if (res.ok) {
         setNewMsg("");
@@ -405,7 +406,8 @@ function Messages() {
   }
 
   // Conversations list
-  const sortedConversations = Object.values(conversations).sort(
+  const filteredConversations = Object.values(conversations).filter(c => c.localPhone === activeLine);
+  const sortedConversations = filteredConversations.sort(
     (a, b) => new Date(b.lastDate).getTime() - new Date(a.lastDate).getTime()
   );
 
@@ -488,7 +490,7 @@ function Messages() {
 
 // ─── Call History Component ─────────────────────────────────────────────
 
-function CallHistory({ onCallNumber }: { onCallNumber: (num: string) => void }) {
+function CallHistory({ onCallNumber, activeLine }: { onCallNumber: (num: string) => void; activeLine: string }) {
   const [calls, setCalls] = useState<CallRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -539,7 +541,7 @@ function CallHistory({ onCallNumber }: { onCallNumber: (num: string) => void }) 
             <p>Sin llamadas recientes</p>
           </div>
         ) : (
-          calls.map((call) => {
+          calls.filter(c => c.from === activeLine || c.to === activeLine).map((call) => {
             const remote = getRemoteNumber(call);
             const isMissed = call.status === "no-answer" || call.status === "canceled";
             return (
@@ -578,7 +580,17 @@ function CallHistory({ onCallNumber }: { onCallNumber: (num: string) => void }) 
 
 // ─── Settings Component ─────────────────────────────────────────────────
 
-function SettingsView() {
+function SettingsView({ activeLine, onLineChange }: { activeLine: string; onLineChange: (line: string) => void }) {
+  const [numbers, setNumbers] = useState<{phone: string, friendlyName: string}[]>([]);
+  
+  useEffect(() => {
+    fetch("/api/numbers")
+      .then(r => r.json())
+      .then(data => {
+        if (Array.isArray(data)) setNumbers(data);
+      })
+      .catch(() => {});
+  }, []);
   return (
     <div className="flex flex-col flex-1 w-full overflow-y-auto">
       <div className="px-5 pt-4 pb-3">
@@ -587,8 +599,17 @@ function SettingsView() {
 
       <div className="px-5 space-y-4 pb-8">
         <div className="bg-zinc-900/50 rounded-2xl p-4 border border-zinc-800/50">
-          <p className="text-xs text-zinc-500 uppercase tracking-wider mb-3">Tu Número Twilio</p>
-          <p className="text-lg font-semibold text-blue-400">{formatPhone(TWILIO_NUMBER)}</p>
+          <p className="text-xs text-zinc-500 uppercase tracking-wider mb-3">Línea Activa</p>
+          <select 
+            value={activeLine} 
+            onChange={(e) => onLineChange(e.target.value)}
+            className="w-full bg-zinc-800 text-white rounded-xl px-4 py-3 text-sm outline-none border border-zinc-700 focus:border-blue-500/50 appearance-none"
+          >
+            <option value={TWILIO_NUMBER}>{formatPhone(TWILIO_NUMBER)} (Principal)</option>
+            {numbers.filter(n => n.phone !== TWILIO_NUMBER).map(n => (
+              <option key={n.phone} value={n.phone}>{formatPhone(n.phone)} ({n.friendlyName})</option>
+            ))}
+          </select>
         </div>
 
         <div className="bg-zinc-900/50 rounded-2xl p-4 border border-zinc-800/50">
@@ -634,6 +655,13 @@ export default function Home() {
   const deviceRef = useRef<any>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const activeCallRef = useRef<any>(null);
+
+  const [activeLine, setActiveLine] = useState<string>(TWILIO_NUMBER);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("activeLine");
+    if (saved) setActiveLine(saved);
+  }, []);
 
   // Initialize Twilio Voice Device
   useEffect(() => {
@@ -684,7 +712,7 @@ export default function Home() {
       setCallState("calling");
       setTab("dialer");
       const call = await deviceRef.current.connect({
-        params: { To: number },
+        params: { To: number, From: activeLine },
       });
 
       activeCallRef.current = call;
@@ -782,9 +810,17 @@ export default function Home() {
             isSpeaker={isSpeaker}
           />
         )}
-        {tab === "messages" && <Messages />}
-        {tab === "history" && <CallHistory onCallNumber={handleCallFromHistory} />}
-        {tab === "settings" && <SettingsView />}
+        {tab === "messages" && <Messages activeLine={activeLine} />}
+        {tab === "history" && <CallHistory onCallNumber={handleCallFromHistory} activeLine={activeLine} />}
+        {tab === "settings" && (
+          <SettingsView
+            activeLine={activeLine}
+            onLineChange={(l) => {
+              setActiveLine(l);
+              localStorage.setItem("activeLine", l);
+            }}
+          />
+        )}
       </main>
 
       {/* Bottom Navigation */}

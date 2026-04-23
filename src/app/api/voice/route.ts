@@ -7,17 +7,18 @@ export async function POST(req: Request) {
   const body = await req.text();
   const params = new URLSearchParams(body);
   const to = params.get("To");
+  const from = params.get("From");
 
   const twiml = new VoiceResponse();
   const myTwilioNumber = process.env.NEXT_PUBLIC_TWILIO_PHONE_NUMBER;
 
   if (to === myTwilioNumber) {
-    // Llamada entrante al número Twilio → enrutar al cliente web
+    // Llamada entrante al número Twilio principal → enrutar al cliente web
     const dial = twiml.dial();
     dial.client("personal_client_01");
   } else if (to) {
     // Llamada saliente desde la app → marcar el número destino
-    const dial = twiml.dial({ callerId: myTwilioNumber });
+    const dial = twiml.dial({ callerId: from || myTwilioNumber });
     dial.number(to);
   } else {
     twiml.say("Gracias por llamar. Adiós.");
