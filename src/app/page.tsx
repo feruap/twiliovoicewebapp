@@ -132,6 +132,34 @@ function Dialer({
     };
   }, [callState]);
 
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout>>(null);
+  const isLongPressRef = useRef(false);
+
+  const handlePointerDown = (num: string) => {
+    isLongPressRef.current = false;
+    if (num === "0") {
+      longPressTimerRef.current = setTimeout(() => {
+        isLongPressRef.current = true;
+        setNumber((p) => p + "+");
+      }, 500); // 500ms para considerar long press
+    }
+  };
+
+  const handlePointerUp = (num: string) => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+    }
+    if (!isLongPressRef.current) {
+      setNumber((p) => p + num);
+    }
+  };
+
+  const handlePointerLeave = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+    }
+  };
+
   const dialPad = [
     { num: "1", sub: "" },
     { num: "2", sub: "ABC" },
@@ -210,11 +238,13 @@ function Dialer({
         {dialPad.map(({ num, sub }) => (
           <button
             key={num}
-            onClick={() => setNumber((p) => p + num)}
-            className="w-full aspect-square max-w-[88px] mx-auto rounded-full bg-zinc-900/80 border border-zinc-800/50 flex flex-col items-center justify-center active:bg-zinc-700 active:scale-95 transition-all"
+            onPointerDown={() => handlePointerDown(num)}
+            onPointerUp={() => handlePointerUp(num)}
+            onPointerLeave={handlePointerLeave}
+            className="w-full aspect-square max-w-[88px] mx-auto rounded-full bg-zinc-900/80 border border-zinc-800/50 flex flex-col items-center justify-center active:bg-zinc-700 active:scale-95 transition-all select-none touch-manipulation"
           >
-            <span className="text-2xl font-light text-white">{num}</span>
-            {sub && <span className="text-[10px] tracking-widest text-zinc-500 mt-0.5">{sub}</span>}
+            <span className="text-2xl font-light text-white pointer-events-none">{num}</span>
+            {sub && <span className="text-[10px] tracking-widest text-zinc-500 mt-0.5 pointer-events-none">{sub}</span>}
           </button>
         ))}
       </div>
