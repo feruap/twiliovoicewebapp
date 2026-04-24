@@ -800,7 +800,7 @@ export default function Home() {
       setCallState("calling");
       setTab("dialer");
       const call = await deviceRef.current.connect({
-        params: { To: number, From: activeLine },
+        params: { customTo: number, customFrom: activeLine },
       });
 
       activeCallRef.current = call;
