@@ -108,6 +108,9 @@ function Dialer({
   onSpeaker,
   isMuted,
   isSpeaker,
+  activeLine,
+  numbers,
+  onLineChange
 }: {
   onCall: (num: string) => void;
   callState: "idle" | "calling" | "connected" | "incoming";
@@ -116,6 +119,9 @@ function Dialer({
   onSpeaker: () => void;
   isMuted: boolean;
   isSpeaker: boolean;
+  activeLine: string;
+  numbers: {phone: string, friendlyName: string}[];
+  onLineChange: (l: string) => void;
 }) {
   const [number, setNumber] = useState("");
   const [callDuration, setCallDuration] = useState(0);
@@ -227,6 +233,20 @@ function Dialer({
 
   return (
     <div className="flex flex-col items-center flex-1 w-full justify-center px-4 py-6">
+      {/* Line Selector */}
+      <div className="w-full max-w-[320px] mb-2">
+        <select 
+          value={activeLine} 
+          onChange={(e) => onLineChange(e.target.value)}
+          className="w-full bg-zinc-900/50 text-zinc-400 rounded-xl px-4 py-2 text-xs outline-none border border-zinc-800 focus:border-blue-500/50 appearance-none text-center"
+        >
+          {numbers.length === 0 && <option value={TWILIO_NUMBER}>Llamar desde: {formatPhone(TWILIO_NUMBER)}</option>}
+          {numbers.map(n => (
+            <option key={n.phone} value={n.phone}>Llamar desde: {formatPhone(n.phone)} {n.friendlyName !== n.phone ? `(${n.friendlyName})` : ''}</option>
+          ))}
+        </select>
+      </div>
+
       {/* Number display */}
       <div className="h-16 flex items-center justify-center mb-4 w-full max-w-[320px]">
         <span className="text-3xl font-light text-white tracking-[0.15em] text-center truncate">
@@ -580,8 +600,7 @@ function CallHistory({ onCallNumber, activeLine }: { onCallNumber: (num: string)
 
 // ─── Settings Component ─────────────────────────────────────────────────
 
-function SettingsView({ activeLine, onLineChange }: { activeLine: string; onLineChange: (line: string) => void }) {
-  const [numbers, setNumbers] = useState<{phone: string, friendlyName: string}[]>([]);
+function SettingsView({ activeLine, onLineChange, numbers }: { activeLine: string; onLineChange: (line: string) => void; numbers: {phone: string, friendlyName: string}[] }) {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState("");
   const [fallbackNumber, setFallbackNumber] = useState("");
@@ -630,14 +649,7 @@ function SettingsView({ activeLine, onLineChange }: { activeLine: string; onLine
   };
   
   useEffect(() => {
-    fetch("/api/numbers")
-      .then(r => r.json())
-      .then(data => {
-        if (Array.isArray(data)) setNumbers(data);
-      })
-      .catch(() => {});
-      
-    fetch("/api/settings")
+    fetch("/api/settings?t=" + Date.now())
       .then(r => r.json())
       .then(data => {
         if (data.fallbackNumber) setFallbackNumber(data.fallbackNumber);
@@ -658,9 +670,9 @@ function SettingsView({ activeLine, onLineChange }: { activeLine: string; onLine
             onChange={(e) => onLineChange(e.target.value)}
             className="w-full bg-zinc-800 text-white rounded-xl px-4 py-3 text-sm outline-none border border-zinc-700 focus:border-blue-500/50 appearance-none"
           >
-            <option value={TWILIO_NUMBER}>{formatPhone(TWILIO_NUMBER)} (Principal)</option>
-            {numbers.filter(n => n.phone !== TWILIO_NUMBER).map(n => (
-              <option key={n.phone} value={n.phone}>{formatPhone(n.phone)} ({n.friendlyName})</option>
+            {numbers.length === 0 && <option value={TWILIO_NUMBER}>{formatPhone(TWILIO_NUMBER)} (Principal)</option>}
+            {numbers.map(n => (
+              <option key={n.phone} value={n.phone}>{formatPhone(n.phone)} {n.friendlyName !== n.phone ? `(${n.friendlyName})` : ''}</option>
             ))}
           </select>
 
@@ -745,10 +757,22 @@ export default function Home() {
   const activeCallRef = useRef<any>(null);
 
   const [activeLine, setActiveLine] = useState<string>(TWILIO_NUMBER);
+  const [numbers, setNumbers] = useState<{phone: string, friendlyName: string}[]>([]);
 
   useEffect(() => {
     const saved = localStorage.getItem("activeLine");
     if (saved) setActiveLine(saved);
+    
+    fetch("/api/numbers?t=" + Date.now())
+      .then(r => r.json())
+      .then(data => {
+        if (Array.isArray(data) && data.length > 0) {
+          setNumbers(data);
+          // If activeLine is not in the list, default to the first one
+          if (!saved) setActiveLine(data[0].phone);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   // Initialize Twilio Voice Device
@@ -896,6 +920,12 @@ export default function Home() {
             onSpeaker={handleSpeaker}
             isMuted={isMuted}
             isSpeaker={isSpeaker}
+            activeLine={activeLine}
+            numbers={numbers}
+            onLineChange={(l) => {
+              setActiveLine(l);
+              localStorage.setItem("activeLine", l);
+            }}
           />
         )}
         {tab === "messages" && <Messages activeLine={activeLine} />}
@@ -903,6 +933,7 @@ export default function Home() {
         {tab === "settings" && (
           <SettingsView
             activeLine={activeLine}
+            numbers={numbers}
             onLineChange={(l) => {
               setActiveLine(l);
               localStorage.setItem("activeLine", l);
