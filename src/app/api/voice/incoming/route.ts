@@ -15,7 +15,8 @@ export async function POST(req: Request) {
   try {
     const fs = require("fs");
     const path = require("path");
-    const settingsFile = path.join(process.cwd(), "data", "settings.json");
+    const os = require("os");
+    const settingsFile = path.join(os.tmpdir(), "twilio-settings.json");
     if (fs.existsSync(settingsFile)) {
       const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
       if (settings.fallbackNumber) {

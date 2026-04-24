@@ -1,20 +1,11 @@
 import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
+import os from "os";
 
 export const dynamic = 'force-dynamic';
 
-const dataDir = path.join(process.cwd(), "data");
-const settingsFile = path.join(dataDir, "settings.json");
-
-function ensureDirectoryExistence(filePath: string) {
-  const dirname = path.dirname(filePath);
-  if (fs.existsSync(dirname)) {
-    return true;
-  }
-  ensureDirectoryExistence(dirname);
-  fs.mkdirSync(dirname);
-}
+const settingsFile = path.join(os.tmpdir(), "twilio-settings.json");
 
 export async function GET() {
   try {
@@ -32,7 +23,6 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    ensureDirectoryExistence(settingsFile);
     
     // Read existing to merge
     let currentSettings = {};
