@@ -19,6 +19,10 @@ import {
   X,
   Loader2,
   ChevronRight,
+  AlertCircle,
+  CheckCircle2,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 
 // ─── Types ──────────────────────────────────────────────────────────────
@@ -54,8 +58,38 @@ interface CallRecord {
 }
 
 type Tab = "dialer" | "messages" | "history" | "settings";
+type ToastType = "success" | "error" | "info";
+interface ToastData { id: number; message: string; type: ToastType; exiting?: boolean; }
 
 const TWILIO_NUMBER = process.env.NEXT_PUBLIC_TWILIO_PHONE_NUMBER || "";
+const TOKEN_REFRESH_INTERVAL = 50 * 60 * 1000; // 50 minutes
+
+// ─── Toast Component ────────────────────────────────────────────────────
+
+function ToastContainer({ toasts, onDismiss }: { toasts: ToastData[]; onDismiss: (id: number) => void }) {
+  return (
+    <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex flex-col gap-2 pointer-events-none w-[90%] max-w-md">
+      {toasts.map((t) => (
+        <div
+          key={t.id}
+          onClick={() => onDismiss(t.id)}
+          className={`pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-2xl border backdrop-blur-xl shadow-lg cursor-pointer ${t.exiting ? "toast-exit" : "toast-enter"} ${
+            t.type === "error"
+              ? "bg-red-950/80 border-red-800/50 text-red-200"
+              : t.type === "success"
+              ? "bg-green-950/80 border-green-800/50 text-green-200"
+              : "bg-zinc-900/80 border-zinc-700/50 text-zinc-200"
+          }`}
+        >
+          {t.type === "error" ? <AlertCircle className="w-5 h-5 shrink-0 text-red-400" /> :
+           t.type === "success" ? <CheckCircle2 className="w-5 h-5 shrink-0 text-green-400" /> :
+           <AlertCircle className="w-5 h-5 shrink-0 text-blue-400" />}
+          <p className="text-sm font-medium flex-1">{t.message}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 // ─── Utils ──────────────────────────────────────────────────────────────
 
@@ -298,7 +332,7 @@ function Dialer({
 
 // ─── Messages Component ─────────────────────────────────────────────────
 
-function Messages({ activeLine }: { activeLine: string }) {
+function Messages({ activeLine, onToast }: { activeLine: string; onToast: (msg: string, type: ToastType) => void }) {
   const [conversations, setConversations] = useState<Record<string, Conversation>>({});
   const [loading, setLoading] = useState(true);
   const [activeChat, setActiveChat] = useState<string | null>(null);
@@ -314,16 +348,21 @@ function Messages({ activeLine }: { activeLine: string }) {
       if (res.ok) {
         const data = await res.json();
         setConversations(data);
+      } else if (res.status === 401) {
+        onToast("Sesión expirada. Recarga la app.", "error");
       }
     } catch {
-      /* silently fail */
+      onToast("Error cargando mensajes", "error");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [onToast]);
 
   useEffect(() => {
     fetchMessages();
+    // Auto-refresh messages every 30 seconds
+    const interval = setInterval(fetchMessages, 30000);
+    return () => clearInterval(interval);
   }, [fetchMessages]);
 
   useEffect(() => {
@@ -349,17 +388,23 @@ function Messages({ activeLine }: { activeLine: string }) {
           setNewConvoPhone("");
         }
         await fetchMessages();
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        onToast(errData.error || "Error al enviar mensaje", "error");
       }
     } catch {
-      /* silently fail */
+      onToast("Error de conexión al enviar", "error");
     } finally {
       setSending(false);
     }
   };
 
   // Chat detail view
+  // CODE-02: Find conversation by matching the phone field (not the composite key)
   if (activeChat) {
-    const convo = conversations[activeChat];
+    const convo = Object.values(conversations).find(
+      (c) => c.phone === activeChat && c.localPhone === activeLine
+    ) || Object.values(conversations).find((c) => c.phone === activeChat);
     const msgs = convo?.messages || [];
     // Sort by date
     const sorted = [...msgs].sort(
@@ -425,9 +470,9 @@ function Messages({ activeLine }: { activeLine: string }) {
     );
   }
 
-  // Conversations list
+  // Conversations list — CODE-01: avoid mutating with .sort(), use .toSorted() pattern
   const filteredConversations = Object.values(conversations).filter(c => c.localPhone === activeLine);
-  const sortedConversations = filteredConversations.sort(
+  const sortedConversations = [...filteredConversations].sort(
     (a, b) => new Date(b.lastDate).getTime() - new Date(a.lastDate).getTime()
   );
 
@@ -510,25 +555,26 @@ function Messages({ activeLine }: { activeLine: string }) {
 
 // ─── Call History Component ─────────────────────────────────────────────
 
-function CallHistory({ onCallNumber, activeLine }: { onCallNumber: (num: string) => void; activeLine: string }) {
+function CallHistory({ onCallNumber, activeLine, onToast }: { onCallNumber: (num: string) => void; activeLine: string; onToast: (msg: string, type: ToastType) => void }) {
   const [calls, setCalls] = useState<CallRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setLoading(true);
     (async () => {
       try {
-        const res = await fetch("/api/calls");
+        const res = await fetch("/api/calls?t=" + Date.now());
         if (res.ok) {
           const data = await res.json();
           setCalls(data);
         }
       } catch {
-        /* silently fail */
+        onToast("Error cargando historial", "error");
       } finally {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [onToast]);
 
   const getCallIcon = (call: CallRecord) => {
     if (call.status === "no-answer" || call.status === "canceled") {
@@ -600,35 +646,44 @@ function CallHistory({ onCallNumber, activeLine }: { onCallNumber: (num: string)
 
 // ─── Settings Component ─────────────────────────────────────────────────
 
-function SettingsView({ activeLine, onLineChange, numbers }: { activeLine: string; onLineChange: (line: string) => void; numbers: {phone: string, friendlyName: string}[] }) {
+function SettingsView({ activeLine, onLineChange, numbers, onRefreshNumbers, onToast }: { activeLine: string; onLineChange: (line: string) => void; numbers: {phone: string, friendlyName: string}[]; onRefreshNumbers: () => Promise<void>; onToast: (msg: string, type: ToastType) => void }) {
   const [syncing, setSyncing] = useState(false);
-  const [syncMsg, setSyncMsg] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
   const [fallbackNumber, setFallbackNumber] = useState("");
   const [savingFallback, setSavingFallback] = useState(false);
-  const [fallbackMsg, setFallbackMsg] = useState("");
   
   const handleSync = async () => {
     setSyncing(true);
-    setSyncMsg("");
     try {
       const res = await fetch("/api/sync-webhooks", { method: "POST" });
       const data = await res.json();
       if (res.ok) {
-        setSyncMsg(data.message || "Sincronizado correctamente.");
+        onToast(data.message || "Webhooks sincronizados correctamente.", "success");
+        await onRefreshNumbers();
       } else {
-        setSyncMsg(data.error || "Error al sincronizar.");
+        onToast(data.error || "Error al sincronizar webhooks.", "error");
       }
     } catch {
-      setSyncMsg("Error de conexión.");
+      onToast("Error de conexión al sincronizar.", "error");
     } finally {
       setSyncing(false);
-      setTimeout(() => setSyncMsg(""), 5000);
+    }
+  };
+
+  const handleRefreshNumbers = async () => {
+    setRefreshing(true);
+    try {
+      await onRefreshNumbers();
+      onToast("Líneas actualizadas.", "success");
+    } catch {
+      onToast("Error al recargar líneas.", "error");
+    } finally {
+      setRefreshing(false);
     }
   };
 
   const handleSaveFallback = async () => {
     setSavingFallback(true);
-    setFallbackMsg("");
     try {
       const res = await fetch("/api/settings", { 
         method: "POST",
@@ -636,15 +691,14 @@ function SettingsView({ activeLine, onLineChange, numbers }: { activeLine: strin
         body: JSON.stringify({ fallbackNumber: fallbackNumber.trim() })
       });
       if (res.ok) {
-        setFallbackMsg("Guardado correctamente.");
+        onToast("Número de desvío guardado.", "success");
       } else {
-        setFallbackMsg("Error al guardar.");
+        onToast("Error al guardar número de desvío.", "error");
       }
     } catch {
-      setFallbackMsg("Error de conexión.");
+      onToast("Error de conexión.", "error");
     } finally {
       setSavingFallback(false);
-      setTimeout(() => setFallbackMsg(""), 3000);
     }
   };
   
@@ -676,16 +730,24 @@ function SettingsView({ activeLine, onLineChange, numbers }: { activeLine: strin
             ))}
           </select>
 
-          <div className="mt-4 pt-4 border-t border-zinc-800/50">
+          <div className="mt-4 pt-4 border-t border-zinc-800/50 flex flex-col gap-2">
+            <button
+              onClick={handleRefreshNumbers}
+              disabled={refreshing}
+              className="w-full bg-zinc-800 text-zinc-300 hover:bg-zinc-700 rounded-xl px-4 py-2.5 text-sm font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {refreshing && <Loader2 className="w-4 h-4 animate-spin" />}
+              {refreshing ? "Recargando..." : "Recargar Líneas"}
+            </button>
             <button
               onClick={handleSync}
               disabled={syncing}
               className="w-full bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded-xl px-4 py-2.5 text-sm font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {syncing && <Loader2 className="w-4 h-4 animate-spin" />}
-              {syncing ? "Sincronizando..." : "Sincronizar Líneas de Twilio"}
+              {syncing ? "Sincronizando..." : "Sincronizar Webhooks de Twilio"}
             </button>
-            {syncMsg && <p className="text-[10px] text-zinc-400 text-center mt-2">{syncMsg}</p>}
+            <p className="text-[10px] text-zinc-600 text-center">Apunta los webhooks de voz y SMS de todas tus líneas a esta app.</p>
           </div>
         </div>
 
@@ -708,7 +770,6 @@ function SettingsView({ activeLine, onLineChange, numbers }: { activeLine: strin
               {savingFallback && <Loader2 className="w-4 h-4 animate-spin" />}
               {savingFallback ? "Guardando..." : "Guardar Número"}
             </button>
-            {fallbackMsg && <p className="text-[10px] text-zinc-400 text-center">{fallbackMsg}</p>}
           </div>
         </div>
 
@@ -755,68 +816,165 @@ export default function Home() {
   const deviceRef = useRef<any>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const activeCallRef = useRef<any>(null);
+  const [incomingCaller, setIncomingCaller] = useState<string>("");
+  const [voiceConnected, setVoiceConnected] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const lastSeenMsgCount = useRef(0);
+
+  // ─── Toast System ─────────────────────
+  const [toasts, setToasts] = useState<ToastData[]>([]);
+  const toastIdRef = useRef(0);
+  const showToast = useCallback((message: string, type: ToastType = "info") => {
+    const id = ++toastIdRef.current;
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.map((t) => (t.id === id ? { ...t, exiting: true } : t)));
+      setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 300);
+    }, 3500);
+  }, []);
+  const dismissToast = useCallback((id: number) => {
+    setToasts((prev) => prev.map((t) => (t.id === id ? { ...t, exiting: true } : t)));
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 300);
+  }, []);
 
   const [activeLine, setActiveLine] = useState<string>(TWILIO_NUMBER);
   const [numbers, setNumbers] = useState<{phone: string, friendlyName: string}[]>([]);
+
+  const refreshNumbers = useCallback(async () => {
+    const res = await fetch("/api/numbers?t=" + Date.now());
+    const data = await res.json();
+    if (Array.isArray(data) && data.length > 0) {
+      setNumbers(data);
+      // BUG-01: Set activeLine to first number if no saved preference
+      const saved = localStorage.getItem("activeLine");
+      if (!saved) {
+        setActiveLine(data[0].phone);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     const saved = localStorage.getItem("activeLine");
     if (saved) setActiveLine(saved);
     
-    fetch("/api/numbers?t=" + Date.now())
-      .then(r => r.json())
-      .then(data => {
-        if (Array.isArray(data) && data.length > 0) {
-          setNumbers(data);
-          // If activeLine is not in the list, default to the first one
-          if (!saved) setActiveLine(data[0].phone);
-        }
-      })
-      .catch(() => {});
-  }, []);
+    refreshNumbers()
+      .catch(() => showToast("Error cargando líneas", "error"));
+  }, [showToast, refreshNumbers]);
 
-  // Initialize Twilio Voice Device
+  // ─── Unread badge: poll for new messages when not on messages tab ─────
   useEffect(() => {
-    const initDevice = async () => {
+    if (tab === "messages") {
+      setUnreadCount(0);
+      return;
+    }
+    const checkUnread = async () => {
+      try {
+        const res = await fetch("/api/sms");
+        if (res.ok) {
+          const data = await res.json();
+          const totalMsgs = Object.values(data as Record<string, Conversation>).reduce((sum, c) => sum + c.messages.length, 0);
+          if (lastSeenMsgCount.current > 0 && totalMsgs > lastSeenMsgCount.current) {
+            setUnreadCount(totalMsgs - lastSeenMsgCount.current);
+          }
+          lastSeenMsgCount.current = totalMsgs;
+        }
+      } catch { /* ignore */ }
+    };
+    const interval = setInterval(checkUnread, 60000);
+    return () => clearInterval(interval);
+  }, [tab]);
+
+  // ─── Initialize Twilio Voice Device with token renewal ─────
+  useEffect(() => {
+    let tokenTimer: ReturnType<typeof setInterval> | null = null;
+
+    const fetchToken = async (): Promise<string | null> => {
       try {
         const res = await fetch("/api/voice/token");
-        if (!res.ok) return;
+        if (!res.ok) return null;
         const { token } = await res.json();
-        
-        // Dynamic import of @twilio/voice-sdk
-        const { Device } = await import("@twilio/voice-sdk");
-        const device = new Device(token, {
-          logLevel: 1,
-        });
+        return token;
+      } catch {
+        return null;
+      }
+    };
 
-        device.on("incoming", (call: unknown) => {
+    const initDevice = async () => {
+      try {
+        const token = await fetchToken();
+        if (!token) {
+          showToast("No se pudo obtener token de voz", "error");
+          return;
+        }
+        
+        const { Device } = await import("@twilio/voice-sdk");
+        const device = new Device(token, { logLevel: 1 });
+
+        device.on("incoming", (call: any) => {
           activeCallRef.current = call;
+          // Extract caller ID from the call parameters
+          const caller = call.parameters?.From || call.parameters?.from || "Desconocido";
+          setIncomingCaller(caller);
           setCallState("incoming");
         });
 
+        device.on("registered", () => setVoiceConnected(true));
+        device.on("unregistered", () => setVoiceConnected(false));
         device.on("error", (error: unknown) => {
           console.error("Twilio Device Error:", error);
+          setVoiceConnected(false);
+          showToast("Error en Voice SDK", "error");
+        });
+
+        // Token refresh handler
+        device.on("tokenWillExpire", async () => {
+          const newToken = await fetchToken();
+          if (newToken) {
+            device.updateToken(newToken);
+            console.log("🔄 Voice token renovado");
+          }
         });
 
         await device.register();
         deviceRef.current = device;
+        setVoiceConnected(true);
+
+        // Also proactively renew every 50 min as safety net
+        tokenTimer = setInterval(async () => {
+          const newToken = await fetchToken();
+          if (newToken && deviceRef.current) {
+            deviceRef.current.updateToken(newToken);
+            console.log("🔄 Voice token renovado (timer)");
+          }
+        }, TOKEN_REFRESH_INTERVAL);
+
       } catch (err) {
         console.error("Failed to init Twilio Voice:", err);
+        showToast("Error inicializando Voice SDK", "error");
       }
     };
 
     initDevice();
 
     return () => {
+      if (tokenTimer) clearInterval(tokenTimer);
       if (deviceRef.current) {
         deviceRef.current.destroy();
       }
     };
+  }, [showToast]);
+
+  // ─── Reset mute/speaker after call ends ─────
+  const cleanupCallState = useCallback(() => {
+    setIsMuted(false);
+    setIsSpeaker(false);
+    activeCallRef.current = null;
+    setIncomingCaller("");
   }, []);
 
   const handleCall = async (number: string) => {
     if (!deviceRef.current) {
-      alert("Voice SDK no está listo aún. Intenta en unos segundos.");
+      showToast("Voice SDK no está listo aún. Intenta en unos segundos.", "error");
       return;
     }
 
@@ -832,19 +990,22 @@ export default function Home() {
       call.on("accept", () => setCallState("connected"));
       call.on("disconnect", () => {
         setCallState("idle");
-        activeCallRef.current = null;
+        cleanupCallState();
       });
       call.on("cancel", () => {
         setCallState("idle");
-        activeCallRef.current = null;
+        cleanupCallState();
       });
       call.on("error", () => {
         setCallState("idle");
-        activeCallRef.current = null;
+        cleanupCallState();
+        showToast("Error en la llamada", "error");
       });
     } catch (err) {
       console.error("Call failed:", err);
       setCallState("idle");
+      cleanupCallState();
+      showToast("Error al conectar la llamada", "error");
     }
   };
 
@@ -853,7 +1014,7 @@ export default function Home() {
       activeCallRef.current.disconnect();
     }
     setCallState("idle");
-    activeCallRef.current = null;
+    cleanupCallState();
   };
 
   const handleMute = () => {
@@ -872,20 +1033,26 @@ export default function Home() {
     setTimeout(() => handleCall(number), 100);
   };
 
-  // Incoming call banner
+  // Incoming call banner with caller ID
   const incomingBanner = callState === "incoming" && (
-    <div className="absolute top-0 left-0 right-0 z-50 bg-gradient-to-b from-green-900/95 to-green-950/95 backdrop-blur-lg px-5 py-6 flex flex-col items-center gap-4 animate-pulse">
-      <p className="text-lg font-semibold text-white">Llamada entrante</p>
-      <div className="flex gap-8">
+    <div className="absolute top-0 left-0 right-0 z-50 bg-gradient-to-b from-green-900/95 to-green-950/95 backdrop-blur-lg px-5 py-8 flex flex-col items-center gap-5 slide-down">
+      <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center ring-pulse">
+        <PhoneIncoming className="w-8 h-8 text-green-400" />
+      </div>
+      <div className="text-center">
+        <p className="text-lg font-semibold text-white">Llamada entrante</p>
+        <p className="text-base text-green-300/80 mt-1">{formatPhone(incomingCaller) || "Número desconocido"}</p>
+      </div>
+      <div className="flex gap-10">
         <button
           onClick={() => {
             if (activeCallRef.current) {
               activeCallRef.current.reject();
             }
             setCallState("idle");
-            activeCallRef.current = null;
+            cleanupCallState();
           }}
-          className="w-16 h-16 rounded-full bg-red-600 text-white flex items-center justify-center shadow-lg shadow-red-600/30"
+          className="w-16 h-16 rounded-full bg-red-600 text-white flex items-center justify-center shadow-lg shadow-red-600/30 active:scale-95 transition-transform"
         >
           <PhoneOff className="w-7 h-7" />
         </button>
@@ -897,7 +1064,7 @@ export default function Home() {
             setCallState("connected");
             setTab("dialer");
           }}
-          className="w-16 h-16 rounded-full bg-green-500 text-white flex items-center justify-center shadow-lg shadow-green-500/30"
+          className="w-16 h-16 rounded-full bg-green-500 text-white flex items-center justify-center shadow-lg shadow-green-500/30 active:scale-95 transition-transform"
         >
           <Phone className="w-7 h-7 fill-current" />
         </button>
@@ -907,39 +1074,53 @@ export default function Home() {
 
   return (
     <div className="flex flex-col h-full bg-black text-white w-full max-w-md mx-auto relative overflow-hidden">
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       {incomingBanner}
+
+      {/* Connection Status Bar */}
+      <div className="flex items-center justify-center gap-2 py-1.5 bg-zinc-950/80 border-b border-zinc-800/30">
+        {voiceConnected ? (
+          <><Wifi className="w-3.5 h-3.5 text-green-500 connection-pulse" /><span className="text-[10px] text-green-500/80">Voice conectado</span></>
+        ) : (
+          <><WifiOff className="w-3.5 h-3.5 text-red-500" /><span className="text-[10px] text-red-400/80">Voice desconectado</span></>
+        )}
+      </div>
 
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col pb-[72px] overflow-hidden">
-        {tab === "dialer" && (
-          <Dialer
-            onCall={handleCall}
-            callState={callState}
-            onHangup={handleHangup}
-            onMute={handleMute}
-            onSpeaker={handleSpeaker}
-            isMuted={isMuted}
-            isSpeaker={isSpeaker}
-            activeLine={activeLine}
-            numbers={numbers}
-            onLineChange={(l) => {
-              setActiveLine(l);
-              localStorage.setItem("activeLine", l);
-            }}
-          />
-        )}
-        {tab === "messages" && <Messages activeLine={activeLine} />}
-        {tab === "history" && <CallHistory onCallNumber={handleCallFromHistory} activeLine={activeLine} />}
-        {tab === "settings" && (
-          <SettingsView
-            activeLine={activeLine}
-            numbers={numbers}
-            onLineChange={(l) => {
-              setActiveLine(l);
-              localStorage.setItem("activeLine", l);
-            }}
-          />
-        )}
+        <div key={tab} className="flex-1 flex flex-col overflow-hidden tab-content">
+          {tab === "dialer" && (
+            <Dialer
+              onCall={handleCall}
+              callState={callState}
+              onHangup={handleHangup}
+              onMute={handleMute}
+              onSpeaker={handleSpeaker}
+              isMuted={isMuted}
+              isSpeaker={isSpeaker}
+              activeLine={activeLine}
+              numbers={numbers}
+              onLineChange={(l) => {
+                setActiveLine(l);
+                localStorage.setItem("activeLine", l);
+              }}
+            />
+          )}
+          {tab === "messages" && <Messages activeLine={activeLine} onToast={showToast} />}
+          {tab === "history" && <CallHistory onCallNumber={handleCallFromHistory} activeLine={activeLine} onToast={showToast} />}
+          {tab === "settings" && (
+            <SettingsView
+              activeLine={activeLine}
+              numbers={numbers}
+              onLineChange={(l) => {
+                setActiveLine(l);
+                localStorage.setItem("activeLine", l);
+              }}
+              onRefreshNumbers={refreshNumbers}
+              onToast={showToast}
+            />
+          )}
+        </div>
       </main>
 
       {/* Bottom Navigation */}
@@ -947,17 +1128,24 @@ export default function Home() {
         {[
           { id: "history" as Tab, icon: Clock, label: "Recientes" },
           { id: "dialer" as Tab, icon: Phone, label: "Teclado" },
-          { id: "messages" as Tab, icon: MessageSquare, label: "Mensajes" },
+          { id: "messages" as Tab, icon: MessageSquare, label: "Mensajes", badge: unreadCount },
           { id: "settings" as Tab, icon: Settings, label: "Ajustes" },
-        ].map(({ id, icon: Icon, label }) => (
+        ].map(({ id, icon: Icon, label, badge }) => (
           <button
             key={id}
             onClick={() => setTab(id)}
-            className={`flex flex-col items-center gap-0.5 py-1 px-3 rounded-xl transition-all ${
+            className={`relative flex flex-col items-center gap-0.5 py-1 px-3 rounded-xl transition-all ${
               tab === id ? "text-blue-500" : "text-zinc-500 active:text-zinc-300"
             }`}
           >
-            <Icon className={`w-6 h-6 ${tab === id && (id === "dialer" || id === "messages") ? "fill-current" : ""}`} />
+            <div className="relative">
+              <Icon className={`w-6 h-6 ${tab === id && (id === "dialer" || id === "messages") ? "fill-current" : ""}`} />
+              {badge && badge > 0 ? (
+                <span className="absolute -top-1.5 -right-2 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 badge-pop">
+                  {badge > 99 ? "99+" : badge}
+                </span>
+              ) : null}
+            </div>
             <span className="text-[10px] font-medium">{label}</span>
           </button>
         ))}

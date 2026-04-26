@@ -1,7 +1,27 @@
 import { NextResponse } from "next/server";
 import twilio from "twilio";
+import fs from "fs";
+import path from "path";
+import os from "os";
 
 const VoiceResponse = twilio.twiml.VoiceResponse;
+
+const SETTINGS_FILE = path.join(os.tmpdir(), "twilio-settings.json");
+
+function getFallbackNumber(): string | undefined {
+  // Priority: settings file > env var
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      const settings = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
+      if (settings.fallbackNumber) {
+        return settings.fallbackNumber;
+      }
+    }
+  } catch {
+    // ignore file errors
+  }
+  return process.env.TWILIO_FALLBACK_NUMBER;
+}
 
 // Cuando alguien llama a tu número de Twilio, Twilio hace POST aquí
 export async function POST(req: Request) {
@@ -10,22 +30,7 @@ export async function POST(req: Request) {
   const dialCallStatus = params.get("DialCallStatus");
 
   const twiml = new VoiceResponse();
-  
-  let fallbackNumber = process.env.TWILIO_FALLBACK_NUMBER;
-  try {
-    const fs = require("fs");
-    const path = require("path");
-    const os = require("os");
-    const settingsFile = path.join(os.tmpdir(), "twilio-settings.json");
-    if (fs.existsSync(settingsFile)) {
-      const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
-      if (settings.fallbackNumber) {
-        fallbackNumber = settings.fallbackNumber;
-      }
-    }
-  } catch (e) {
-    // ignore
-  }
+  const fallbackNumber = getFallbackNumber();
 
   // Si ya intentamos llamar al cliente web y no contestó (o falló), desviamos
   if (dialCallStatus && dialCallStatus !== "completed") {
