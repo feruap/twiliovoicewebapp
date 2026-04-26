@@ -32,8 +32,10 @@ export async function POST(req: Request) {
   const twiml = new VoiceResponse();
   const fallbackNumber = getFallbackNumber();
 
-  // Si ya intentamos llamar al cliente web y no contestó (o falló), desviamos
-  if (dialCallStatus && dialCallStatus !== "completed") {
+  if (dialCallStatus) {
+    if (dialCallStatus === "completed") {
+      return new NextResponse(twiml.toString(), { headers: { "Content-Type": "text/xml" } });
+    }
     if (fallbackNumber) {
       twiml.say({ language: "es-MX" }, "Desviando llamada, un momento por favor.");
       twiml.dial(fallbackNumber);
