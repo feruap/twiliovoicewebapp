@@ -912,10 +912,28 @@ export default function Home() {
 
         device.on("incoming", (call: any) => {
           activeCallRef.current = call;
-          // Extract caller ID from the call parameters
           const caller = call.parameters?.From || call.parameters?.from || "Desconocido";
           setIncomingCaller(caller);
           setCallState("incoming");
+
+          call.on("accept", () => setCallState("connected"));
+          call.on("disconnect", () => {
+            setCallState("idle");
+            cleanupCallState();
+          });
+          call.on("cancel", () => {
+            setCallState("idle");
+            cleanupCallState();
+          });
+          call.on("reject", () => {
+            setCallState("idle");
+            cleanupCallState();
+          });
+          call.on("error", () => {
+            setCallState("idle");
+            cleanupCallState();
+            showToast("Error en la llamada entrante", "error");
+          });
         });
 
         device.on("registered", () => setVoiceConnected(true));
@@ -1059,10 +1077,17 @@ export default function Home() {
         <button
           onClick={() => {
             if (activeCallRef.current) {
-              activeCallRef.current.accept();
+              try {
+                activeCallRef.current.accept();
+                setTab("dialer");
+              } catch (err) {
+                console.error("Error accepting call:", err);
+                showToast("No se pudo contestar la llamada (revisa los permisos de micrófono)", "error");
+              }
+            } else {
+              setCallState("idle");
+              cleanupCallState();
             }
-            setCallState("connected");
-            setTab("dialer");
           }}
           className="w-16 h-16 rounded-full bg-green-500 text-white flex items-center justify-center shadow-lg shadow-green-500/30 active:scale-95 transition-transform"
         >
