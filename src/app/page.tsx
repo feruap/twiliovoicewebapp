@@ -816,6 +816,7 @@ export default function Home() {
   const deviceRef = useRef<any>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const activeCallRef = useRef<any>(null);
+  const audioCtxRef = useRef<any>(null);
   const [incomingCaller, setIncomingCaller] = useState<string>("");
   const [voiceConnected, setVoiceConnected] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -988,6 +989,10 @@ export default function Home() {
     setIsSpeaker(false);
     activeCallRef.current = null;
     setIncomingCaller("");
+    if (audioCtxRef.current) {
+      audioCtxRef.current.close().catch(console.error);
+      audioCtxRef.current = null;
+    }
   }, []);
 
   const handleCall = async (number: string) => {
@@ -1046,6 +1051,32 @@ export default function Home() {
     const nextState = !isSpeaker;
     setIsSpeaker(nextState);
 
+    // HACK: For Android WebViews/PWAs where setSinkId is not supported, 
+    // using AudioContext forces the audio to the media stream (loudspeaker)
+    if (activeCallRef.current) {
+      if (nextState) {
+        try {
+          const stream = activeCallRef.current.getRemoteStream();
+          if (stream) {
+            const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+            if (AudioContextClass) {
+              const ctx = new AudioContextClass();
+              const source = ctx.createMediaStreamSource(stream);
+              source.connect(ctx.destination);
+              audioCtxRef.current = ctx;
+            }
+          }
+        } catch (e) {
+          console.warn("AudioContext speaker hack failed:", e);
+        }
+      } else {
+        if (audioCtxRef.current) {
+          audioCtxRef.current.close().catch(console.error);
+          audioCtxRef.current = null;
+        }
+      }
+    }
+
     if (deviceRef.current && deviceRef.current.audio && deviceRef.current.audio.speakerDevices) {
       try {
         const devices = await navigator.mediaDevices.enumerateDevices();
@@ -1057,7 +1088,6 @@ export default function Home() {
             const speaker = audioOutputs.find(d => d.label.toLowerCase().includes("speaker") || d.label.toLowerCase().includes("altavoz"));
             if (speaker) targetId = speaker.deviceId;
             else if (audioOutputs.length > 1) {
-              // Si no hay nombres claros, usualmente el altavoz es el segundo dispositivo en móviles
               const nonDefault = audioOutputs.find(d => d.deviceId !== "default");
               if (nonDefault) targetId = nonDefault.deviceId;
             }
@@ -1074,10 +1104,10 @@ export default function Home() {
         }
       } catch (err) {
         console.error("Error changing speaker device:", err);
-        showToast("Tu dispositivo no soporta cambiar a manos libres", "info");
+        // showToast is optional since AudioContext hack might have worked silently
       }
     } else {
-       showToast("Función no soportada en este navegador", "info");
+       console.log("Speaker APIs not supported natively");
     }
   };
 
