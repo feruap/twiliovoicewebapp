@@ -1042,8 +1042,43 @@ export default function Home() {
     }
   };
 
-  const handleSpeaker = () => {
-    setIsSpeaker(!isSpeaker);
+  const handleSpeaker = async () => {
+    const nextState = !isSpeaker;
+    setIsSpeaker(nextState);
+
+    if (deviceRef.current && deviceRef.current.audio && deviceRef.current.audio.speakerDevices) {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const audioOutputs = devices.filter(d => d.kind === "audiooutput");
+        
+        if (audioOutputs.length > 0) {
+          let targetId = "default";
+          if (nextState) {
+            const speaker = audioOutputs.find(d => d.label.toLowerCase().includes("speaker") || d.label.toLowerCase().includes("altavoz"));
+            if (speaker) targetId = speaker.deviceId;
+            else if (audioOutputs.length > 1) {
+              // Si no hay nombres claros, usualmente el altavoz es el segundo dispositivo en móviles
+              const nonDefault = audioOutputs.find(d => d.deviceId !== "default");
+              if (nonDefault) targetId = nonDefault.deviceId;
+            }
+          } else {
+            const earpiece = audioOutputs.find(d => d.label.toLowerCase().includes("earpiece") || d.label.toLowerCase().includes("auricular"));
+            if (earpiece) targetId = earpiece.deviceId;
+            else {
+              const def = audioOutputs.find(d => d.deviceId === "default");
+              if (def) targetId = def.deviceId;
+              else targetId = audioOutputs[0].deviceId;
+            }
+          }
+          await deviceRef.current.audio.speakerDevices.set(targetId);
+        }
+      } catch (err) {
+        console.error("Error changing speaker device:", err);
+        showToast("Tu dispositivo no soporta cambiar a manos libres", "info");
+      }
+    } else {
+       showToast("Función no soportada en este navegador", "info");
+    }
   };
 
   const handleCallFromHistory = (number: string) => {
