@@ -651,6 +651,7 @@ function SettingsView({ activeLine, onLineChange, numbers, onRefreshNumbers, onT
   const [refreshing, setRefreshing] = useState(false);
   const [fallbackNumber, setFallbackNumber] = useState("");
   const [savingFallback, setSavingFallback] = useState(false);
+  const [balance, setBalance] = useState<string | null>(null);
   
   const handleSync = async () => {
     setSyncing(true);
@@ -707,6 +708,15 @@ function SettingsView({ activeLine, onLineChange, numbers, onRefreshNumbers, onT
       .then(r => r.json())
       .then(data => {
         if (data.fallbackNumber) setFallbackNumber(data.fallbackNumber);
+      })
+      .catch(() => {});
+      
+    fetch("/api/balance?t=" + Date.now())
+      .then(r => r.json())
+      .then(data => {
+        if (data.balance !== undefined) {
+          setBalance(`${data.balance} ${data.currency}`);
+        }
       })
       .catch(() => {});
   }, []);
@@ -796,6 +806,10 @@ function SettingsView({ activeLine, onLineChange, numbers, onRefreshNumbers, onT
         <div className="bg-zinc-900/50 rounded-2xl p-4 border border-zinc-800/50">
           <p className="text-xs text-zinc-500 uppercase tracking-wider mb-3">Información</p>
           <div className="space-y-2 text-sm text-zinc-400">
+            <div className="flex items-center justify-between mb-2 pb-2 border-b border-zinc-800/50">
+              <span>Saldo de Twilio</span>
+              <span className="text-white font-medium">{balance !== null ? balance : "Cargando..."}</span>
+            </div>
             <p>Twilio Personal Client v1.0</p>
             <p>PWA • Next.js 16</p>
           </div>
